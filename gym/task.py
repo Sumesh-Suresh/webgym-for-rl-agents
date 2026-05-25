@@ -73,8 +73,10 @@ class AbstractEcommerceTask(ABC):
     @classmethod
     def sample(cls, seed: int, db_path: Path) -> AbstractEcommerceTask:
         rng = random.Random(seed)
-        task_cls = rng.choice(_TASK_CLASSES)
-        return task_cls(seed, db_path, rng)
+        # Only offer CancelRecentOrderTask when a placed order actually exists.
+        has_placed_order = any(o["status"] == "placed" for o in db.list_orders(db_path))
+        available = [t for t in _TASK_CLASSES if t is not CancelRecentOrderTask or has_placed_order]
+        return rng.choice(available)(seed, db_path, rng)
 
 
 class BuyCheapestInCategoryTask(AbstractEcommerceTask):
@@ -129,6 +131,8 @@ class ApplyCouponWithQuantityTask(AbstractEcommerceTask):
         self.percent_off = db.COUPON_CODE_MAP[self.coupon_code]
         subtotal = self.unit_price_cents * self.quantity
         self.expected_total = _discounted_total(subtotal, self.percent_off)
+        # Sample shipping address at init so oracle policy doesn't advance rng at execution time.
+        self.shipping_address = rng.choice(db.ADDRESS_LIST)
 
     @property
     def name(self) -> str:
@@ -158,6 +162,22 @@ class ApplyCouponWithQuantityTask(AbstractEcommerceTask):
 class CancelRecentOrderTask(AbstractEcommerceTask):
     kind = "cancel_recent_order"
 
+    def __init__(self, seed: int, db_path: Path, rng: random.Random) -> None:
+        super().__init__(seed, db_path, rng)
+        # Anchor to the most recent placed order at reset time.
+        # Storing initial_status lets check_success verify the placed→cancelled transition
+        # explicitly rather than just observing the final state.
+        for order in db.list_orders(db_path):
+            if order["status"] == "placed":
+                self.target_order_id = int(order["id"])
+                self.initial_status: str = order["status"]
+                break
+        else:
+            raise ValueError(
+                "no placed order found at reset; use AbstractEcommerceTask.sample() "
+                "which guards against this case"
+            )
+
     @property
     def name(self) -> str:
         return self.kind
@@ -167,10 +187,13 @@ class CancelRecentOrderTask(AbstractEcommerceTask):
         return "Cancel the most recent existing order in the account."
 
     def check_success(self, db_path: str | Path) -> bool:
-        orders = db.list_orders(db_path)
-        if not orders:
-            return False
-        return orders[0]["status"] == "cancelled"
+        order = db.get_order(db_path, self.target_order_id)
+        # Verify the state transition: order was placed at reset and is now cancelled.
+        return (
+            order is not None
+            and self.initial_status == "placed"
+            and order["status"] == "cancelled"
+        )
 
 
 _TASK_CLASSES: tuple[type[AbstractEcommerceTask], ...] = (

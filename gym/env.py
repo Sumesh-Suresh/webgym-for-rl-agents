@@ -1,8 +1,11 @@
 from __future__ import annotations
+
 import socket
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -84,7 +87,6 @@ class EcommerceEnv(gymnasium.Env):
     def step(
         self, action: Action | UiAction | tuple[int, dict[str, Any]] | dict[str, Any]
     ) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
-        """Execute action, validate task, return Gymnasium 5-tuple like BrowserGym."""
         if self.page is None or self.db_path is None or self.task is None:
             raise RuntimeError("call reset() before step()")
 
@@ -102,7 +104,6 @@ class EcommerceEnv(gymnasium.Env):
     def post_step(
         self, info: dict[str, Any], validate: bool = True
     ) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
-        """Post-step hook: validate task, extract observation, return 5-tuple."""
         assert self.page is not None
         assert self.db_path is not None
         assert self.task is not None
@@ -128,10 +129,7 @@ class EcommerceEnv(gymnasium.Env):
         info["available_actions"] = available_actions(self.page.url)
         info["last_action_error"] = self.last_action_error
 
-        terminated = done
-        truncated = False
-
-        return obs, reward, terminated, truncated, info
+        return obs, reward, done, False, info
 
     def _execute_action(self, action: Action) -> None:
         assert self.page is not None
@@ -140,15 +138,17 @@ class EcommerceEnv(gymnasium.Env):
         if isinstance(action, Click):
             self.page.click(action.selector, timeout=self.timeout_ms)
         elif isinstance(action, TypeText):
-            self.page.fill(action.selector, "")
-            self.page.type(action.selector, action.text, timeout=self.timeout_ms)
+            # page.fill() clears the field and sets the value in one call (page.type is deprecated).
+            self.page.fill(action.selector, action.text)
         elif isinstance(action, Scroll):
             self.page.mouse.wheel(0, float(action.delta_y))
         elif isinstance(action, Navigate):
             url = action.url
             if url.startswith("/"):
                 url = f"{self.base_url}{url}"
+            # goto already waits for networkidle; return early to skip the trailing wait.
             self.page.goto(url, wait_until="networkidle", timeout=self.timeout_ms)
+            return
         else:
             raise ValueError(f"unsupported action: {action!r}")
         self.page.wait_for_load_state("networkidle", timeout=self.timeout_ms)
@@ -220,6 +220,18 @@ class EcommerceEnv(gymnasium.Env):
             daemon=True,
         )
         self._server_thread.start()
+        self._wait_for_server()
+
+    def _wait_for_server(self, timeout: float = 10.0) -> None:
+        """Poll the server's root URL until it responds or the timeout expires."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                urllib.request.urlopen(f"{self.base_url}/", timeout=1.0)
+                return
+            except (urllib.error.URLError, OSError):
+                time.sleep(0.05)
+        raise RuntimeError(f"server at {self.base_url} did not start within {timeout}s")
 
     def _start_browser(self) -> None:
         self._playwright = sync_playwright().start()
@@ -234,16 +246,15 @@ class EcommerceEnv(gymnasium.Env):
 
         dom = self.page.content()
         screenshot = self.page.screenshot(type="png")
-
-        observations_dir = Path("observations") / self.task.name
-        observations_dir.mkdir(parents=True, exist_ok=True)
         self._observation_index += 1
-        url_slug = quote(self.page.url, safe="")
-        filename = f"{self._observation_index:03d}-{url_slug}"
-        dom_path = observations_dir / f"{filename}.html"
-        screenshot_path = observations_dir / f"{filename}.png"
-        dom_path.write_text(dom)
-        screenshot_path.write_bytes(screenshot)
+
+        if self.debug:
+            observations_dir = Path("observations") / self.task.name
+            observations_dir.mkdir(parents=True, exist_ok=True)
+            url_slug = quote(self.page.url, safe="")
+            filename = f"{self._observation_index:03d}-{url_slug}"
+            (observations_dir / f"{filename}.html").write_text(dom)
+            (observations_dir / f"{filename}.png").write_bytes(screenshot)
 
         return {
             "url": self.page.url,

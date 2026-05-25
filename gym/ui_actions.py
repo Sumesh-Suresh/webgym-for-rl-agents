@@ -170,10 +170,6 @@ def detect_store_page(url: str) -> StorePage | None:
         return StorePage.CHECKOUT
     if path == "/orders":
         return StorePage.ORDERS
-    if path.startswith("/product/"):
-        return None
-    if path.startswith("/orders/"):
-        return None
     return None
 
 
@@ -186,39 +182,21 @@ def available_actions(url: str) -> dict[str, list[str]]:
         "sorts": [member.value for member in SortOption],
     }
     if page is StorePage.HOME:
-        options["actions"] = [
-            "filter_products",
-            "open_product",
-            "goto",
-        ]
+        options["actions"] = ["filter_products", "open_product", "goto"]
     elif page is StorePage.CART:
         options["actions"] = [
-            "ui_fill:cart_quantity",
-            "ui_click:update_cart_item",
-            "ui_click:remove_cart_item",
+            "ui_fill:cart_quantity",   # update quantity for a specific SKU
             "ui_fill:coupon_code",
             "ui_click:apply_coupon",
             "ui_click:checkout_link",
             "goto",
         ]
     elif page is None and "/product/" in urlparse(url).path:
-        options["actions"] = [
-            "ui_fill:quantity",
-            "ui_click:add_to_cart",
-            "goto",
-        ]
+        options["actions"] = ["ui_fill:quantity", "ui_click:add_to_cart", "goto"]
     elif page is StorePage.CHECKOUT:
-        options["actions"] = [
-            "ui_fill:shipping_address",
-            "ui_click:place_order",
-            "goto",
-        ]
+        options["actions"] = ["ui_fill:shipping_address", "ui_click:place_order", "goto"]
     elif page is StorePage.ORDERS:
-        options["actions"] = [
-            "view_order",
-            "cancel_order",
-            "goto",
-        ]
+        options["actions"] = ["view_order", "cancel_order", "goto"]
     else:
         options["actions"] = ["goto"]
     return options

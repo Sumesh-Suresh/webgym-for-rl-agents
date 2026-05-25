@@ -8,8 +8,11 @@ from typing import Iterable
 
 
 MIN_PRODUCTS_PER_RESET = 10
+MIN_PER_CATEGORY = 2
 MIN_ORDERS_PER_RESET = 0
 MAX_ORDERS_PER_RESET = 8
+MAX_ITEMS_PER_ORDER = 4
+CANCEL_RATE = 0.3
 
 BASE_PRODUCTS = [
     ("SKU-E1001", "USB-C Charging Cable", "Electronics", 1299, "Braided 6ft cable."),
@@ -92,15 +95,15 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
 
 
 def reset_database(db_path: str | Path, seed: int | None = None) -> None:
+    """
+    """
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     rng = random.Random(0 if seed is None else seed)
 
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
-        # Build the product seed rows once so orders can reference the same sampled SKUs.
         product_rows = list(seeded_products(rng))
-        # Build compatible seeded orders and order item rows from the sampled products.
         order_rows, order_item_rows = seeded_orders(rng, product_rows)
         conn.executemany(
             """
@@ -128,17 +131,19 @@ def reset_database(db_path: str | Path, seed: int | None = None) -> None:
             order_item_rows,
         )
 
+        # NOTE: in the order table created_at is with a base time stamp and iterated with order_id 
+
 
 def list_products(
     db_path: str | Path,
     category: str | None = None,
-    sort_by: str = "category",
+    sort_by: str = "alpha",
 ) -> list[sqlite3.Row]:
     order_by = {
         "alpha": "name COLLATE NOCASE, sku",
         "price_asc": "price_cents, name COLLATE NOCASE, sku",
         "price_desc": "price_cents DESC, name COLLATE NOCASE, sku",
-    }.get(sort_by, "category, price_cents, sku")
+    }.get(sort_by, "name COLLATE NOCASE, sku")
     with connect(db_path) as conn:
         if category:
             return conn.execute(
@@ -179,21 +184,29 @@ def create_order(
         if missing:
             raise ValueError(f"unknown SKU(s): {', '.join(sorted(missing))}")
 
-        subtotal = sum(products[sku]["price_cents"] * qty for sku, qty in items.items())
-        coupon = get_coupon(db_path, coupon_code)
-        if coupon_code and coupon is None:
-            raise ValueError("invalid coupon")
-        discount = subtotal * (coupon["percent_off"] if coupon else 0) // 100
-        total = subtotal - discount
-        order_id = _next_order_id(conn)
-        created_at = current_created_at()
-        conn.execute(
-            """
-            INSERT INTO orders (id, status, shipping_address, coupon_code, total_cents, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (order_id, "placed", shipping_address, coupon_code, total, created_at),
+        # Coupon lookup shares the same connection and transaction as the order insert.
+        coupon_row = (
+            conn.execute("SELECT percent_off FROM coupons WHERE code = ?", (coupon_code,)).fetchone()
+            if coupon_code
+            else None
         )
+        if coupon_code and coupon_row is None:
+            raise ValueError("invalid coupon")
+
+        percent_off = int(coupon_row["percent_off"]) if coupon_row else 0
+        subtotal = sum(products[sku]["price_cents"] * qty for sku, qty in items.items())
+        discount = subtotal * percent_off // 100
+        total = subtotal - discount
+
+        # Let SQLite assign the order ID via INTEGER PRIMARY KEY autoincrement; use lastrowid.
+        cursor = conn.execute(
+            """
+            INSERT INTO orders (status, shipping_address, coupon_code, total_cents, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("placed", shipping_address, coupon_code, total, current_created_at()), # added by policy or manually from UI
+        )
+        order_id = cursor.lastrowid
         conn.executemany(
             """
             INSERT INTO order_items (order_id, sku, quantity, unit_price_cents)
@@ -253,7 +266,6 @@ def get_order_contents(db_path: str | Path, order_id: int) -> list[sqlite3.Row]:
         ).fetchall()
 
 
-
 def cheapest_product_in_category(db_path: str | Path, category: str) -> sqlite3.Row:
     with connect(db_path) as conn:
         row = conn.execute(
@@ -266,38 +278,26 @@ def cheapest_product_in_category(db_path: str | Path, category: str) -> sqlite3.
 
 
 def seeded_products(rng: random.Random) -> Iterable[tuple[int, str, str, str, int, str]]:
-    # Bucket the catalog by category so we can guarantee at least one pick per category.
     by_category: dict[str, list[tuple[str, str, str, int, str]]] = {}
     for product in BASE_PRODUCTS:
         by_category.setdefault(product[2], []).append(product)
 
-    # Holds the products we will actually insert into the table.
     selected: list[tuple[str, str, str, int, str]] = []
-    # Pool of remaining products we can draw from to reach MIN_PRODUCTS_PER_RESET.
     leftovers: list[tuple[str, str, str, int, str]] = []
 
-    # Iterate categories in a fixed (sorted) order so shuffles are reproducible per seed.
     for category in sorted(by_category):
-        # Copy the bucket before shuffling so the module-level BASE_PRODUCTS stays untouched.
         bucket = list(by_category[category])
-        # Deterministic shuffle driven by the seeded rng provided by the caller.
         rng.shuffle(bucket)
-        # First item after shuffling becomes the category's guaranteed representative.
-        selected.append(bucket[0])
-        # Remaining items in this category join the pool for optional backfill.
-        leftovers.extend(bucket[1:])
+        selected.extend(bucket[:MIN_PER_CATEGORY])   # guarantee ≥ MIN_PER_CATEGORY per category
+        leftovers.extend(bucket[MIN_PER_CATEGORY:])
 
-    # Shuffle the leftover pool once so any extra picks are also deterministic per seed.
     rng.shuffle(leftovers)
 
-    # If category coverage alone did not hit the minimum, top up from the shuffled pool.
     deficit = max(0, MIN_PRODUCTS_PER_RESET - len(selected))
     selected.extend(leftovers[:deficit])
 
-    # Sort the final selection by SKU so assigned primary-key ids are stable per seed.
-    selected.sort(key=lambda product: product[0])
+    selected.sort(key=lambda product: product[0])  # stable SKU order
 
-    # Emit rows in the exact column order expected by the INSERT statement.
     for product_id, (sku, name, category, price_cents, description) in enumerate(selected, start=1):
         yield (product_id, sku, name, category, price_cents, description)
 
@@ -306,63 +306,33 @@ def seeded_orders(
     rng: random.Random,
     product_rows: Iterable[tuple[int, str, str, str, int, str]],
 ) -> tuple[list[tuple[int, str, str, str | None, int, str]], list[tuple[int, str, int, int]]]:
-    # Convert the iterable to a list so we can sample from the exact products inserted above.
     products = list(product_rows)
-    # Randomize order candidates deterministically using the same seeded rng as product seeding.
-    rng.shuffle(products)
+    n_orders = rng.randint(MIN_ORDERS_PER_RESET, MAX_ORDERS_PER_RESET)
 
-    # Draw the order count from the seeded rng so different seeds produce different history lengths.
-    order_count = rng.randint(MIN_ORDERS_PER_RESET, min(MAX_ORDERS_PER_RESET, len(products)))
-    # Store rows for the orders table.
     order_rows: list[tuple[int, str, str, str | None, int, str]] = []
-    # Store rows for the order_items table.
     order_item_rows: list[tuple[int, str, int, int]] = []
 
-    # Create one seeded order at a time using slices of the shuffled product list.
-    for order_id in range(1, order_count + 1):
-        # Pick one or two products per order without referencing products outside the seeded table.
-        item_count = min(rng.randint(1, 2), len(products))
-        # Rotate through the shuffled products so each order starts from a deterministic position.
-        start_index = (order_id - 1) * item_count % len(products)
-        order_products = [products[(start_index + offset) % len(products)] for offset in range(item_count)]
+    base_date = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc) # for deterministic timestamps
 
-        # Apply the seeded coupon to every other seeded order so coupon totals are exercised.
-        coupon_code = next(iter(COUPON_CODE_MAP)) if order_id % 2 == 0 else None
-        # Keep earlier seeded orders cancelable and include one cancelled example for history views.
-        # status = "cancelled" if order_id == 1 else "placed" TODO: add cancelled for random seeding
-        status = "cancelled" if rng.random() < 0.5 else "placed"
-        # Spread order dates one day apart starting from 2024-01-01 so history is always readable.
-        _base_date = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
-        created_at = (_base_date + timedelta(days=order_id - 1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        # created_at = current_created_at()
+    for order_id in range(1, n_orders + 1):
+        item_count = rng.randint(1, min(2, len(products)))
+        order_products = rng.sample(products, item_count)
+        coupon_code = rng.choice([None] + sorted(COUPON_CODE_MAP.keys()))
+        status = "cancelled" if rng.random() < CANCEL_RATE else "placed"
+        created_at = (base_date + timedelta(days=order_id - 1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        shipping_address = rng.choice(ADDRESS_LIST)
 
-        # Track the subtotal before any coupon discount.
         subtotal = 0
         for _, sku, _, _, price_cents, _ in order_products:
-            # Quantity is deterministic and intentionally small for readable seeded orders.
-            quantity = rng.randint(1, 2)
-            # Record the order_items row using the product's seeded SKU and price.
+            quantity = rng.randint(1, MAX_ITEMS_PER_ORDER)
             order_item_rows.append((order_id, sku, quantity, price_cents))
-            # Add this line item to the order subtotal.
             subtotal += price_cents * quantity
 
-        # Apply the same coupon percentage used by the coupons table.
         discount = subtotal * COUPON_CODE_MAP[coupon_code] // 100 if coupon_code else 0
-        # Store the final order total after any coupon discount.
         total_cents = subtotal - discount
-        # Pick a seeded shipping address from the configured address list.
-        shipping_address = rng.choice(ADDRESS_LIST)
-        # Record the orders row in the exact column order expected by the INSERT statement.
         order_rows.append((order_id, status, shipping_address, coupon_code, total_cents, created_at))
 
-    # Return both related table payloads together so reset_database can insert them in FK order.
     return order_rows, order_item_rows
-
-
-
-def _next_order_id(conn: sqlite3.Connection) -> int:
-    row = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM orders").fetchone()
-    return int(row["next_id"])
 
 
 def current_created_at() -> str:

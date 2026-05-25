@@ -1,4 +1,4 @@
--r requirements-app.txt
+-r ../app/requirements-app.txt
 gymnasium>=0.29
 playwright>=1.44
 pytest>=8.0

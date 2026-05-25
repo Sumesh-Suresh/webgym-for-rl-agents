@@ -122,7 +122,8 @@ def action_to_oneof(action: Action) -> tuple[int, dict[str, Any]]:
     raise TypeError(f"unsupported action type: {type(action)!r}")
 
 
-def coerce_ui_action(action: dict[str, Any]):
+def _coerce_ui_action_dict(action: dict[str, Any]) -> GoTo | FilterProducts | OpenProduct | UiClick | UiFill | ViewOrder | CancelOrder:
+    """Convert a plain dict with a ui-action type field into a typed UiAction dataclass."""
     action_type = action["type"]
     if action_type == "goto":
         return GoTo(page=StorePage(action["page"]))
@@ -151,6 +152,7 @@ def coerce_ui_action(action: dict[str, Any]):
 def coerce_action(action: Action | tuple[int, dict[str, Any]] | dict[str, Any]) -> Action:
     if isinstance(action, (Click, TypeText, Scroll, Navigate)):
         return action
+    # UiAction objects: resolve to a low-level action dict, then recurse.
     if isinstance(action, (GoTo, FilterProducts, OpenProduct, UiClick, UiFill, ViewOrder, CancelOrder)):
         return coerce_action(resolve_ui_action(action))
     if isinstance(action, tuple):
@@ -166,7 +168,8 @@ def coerce_action(action: Action | tuple[int, dict[str, Any]] | dict[str, Any]) 
             "view_order",
             "cancel_order",
         }:
-            return coerce_action(resolve_ui_action(coerce_ui_action(action)))
+            # Decode dict → UiAction, then recurse into the UiAction branch above.
+            return coerce_action(_coerce_ui_action_dict(action))
         if action_type == "click":
             return Click(selector=action["selector"])
         if action_type == "type":

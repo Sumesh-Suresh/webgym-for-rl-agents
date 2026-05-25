@@ -3,6 +3,11 @@ services:
     build: .
     ports:
       - "8000:8000"
+    volumes:
+      - storefront_data:/app/data
     environment:
       WEBGYM_SEED: "0"
       WEBGYM_DB: /app/data/store.sqlite
+
+volumes:
+  storefront_data:

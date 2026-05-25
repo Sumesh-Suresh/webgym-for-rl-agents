@@ -28,7 +28,7 @@ def create_app(db_path: str | Path | None = None, seed: int | None = None) -> Fa
     if not database.exists():
         db.reset_database(database, seed)
 
-    app = FastAPI(title="Minimal E-commerce Gym Storefront")
+    app = FastAPI(title="E-Commerce Gym Storefront")
     app.state.db_path = str(database)
 
     @app.get("/", response_class=HTMLResponse)
@@ -55,9 +55,9 @@ def create_app(db_path: str | Path | None = None, seed: int | None = None) -> Fa
             for product in products
         )
         return page(
-            "Stationary Shop",
+            "Store",
             f"""
-            <h1>Stationary Shop</h1>
+            <h1>Store</h1>
             <nav class="home-nav" aria-label="Store pages">
               <a href="/">Products</a>
               <a href="/cart">Cart</a>
@@ -284,7 +284,7 @@ def create_app(db_path: str | Path | None = None, seed: int | None = None) -> Fa
             """
             for order in db.list_orders(app.state.db_path)
         )
-        return page("Orders", f"<h1>Orders</h1><ul aria-label=\"Orders\">{order_items}</ul>")
+        return page("Orders", f'<h1>Orders</h1><ul aria-label="Orders">{order_items}</ul>')
 
     @app.get("/orders/{order_id}", response_class=HTMLResponse)
     async def order_detail(order_id: int):
