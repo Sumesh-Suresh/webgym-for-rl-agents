@@ -7,10 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000 \
     WEBGYM_DB=/app/data/store.sqlite
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements-app.txt .
+RUN pip install --no-cache-dir -r requirements-app.txt
 
-COPY app ./app
+COPY . ./app
 
 EXPOSE 8000
 CMD ["sh", "-c", "uvicorn app.asgi:app --host 0.0.0.0 --port ${PORT}"]
