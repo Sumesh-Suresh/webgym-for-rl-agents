@@ -3,3 +3,4 @@ gymnasium>=0.29
 playwright>=1.44
 pytest>=8.0
 httpx>=0.27
+
