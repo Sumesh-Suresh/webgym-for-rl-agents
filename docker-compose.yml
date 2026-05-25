@@ -1,0 +1,8 @@
+services:
+  storefront:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      WEBGYM_SEED: "0"
+      WEBGYM_DB: /app/data/store.sqlite
