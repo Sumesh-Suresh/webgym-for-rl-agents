@@ -1,1 +1,1 @@
-# webgym-for-rl-agents
+# Minimal web gym for RL agents
