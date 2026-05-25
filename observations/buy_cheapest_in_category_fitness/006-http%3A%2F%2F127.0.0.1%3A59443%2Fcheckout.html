@@ -1,0 +1,79 @@
+<!DOCTYPE html><html lang="en"><head>
+          <meta charset="utf-8">
+          <title>Checkout</title>
+          <style>
+            .home-nav {
+              display: flex;
+              gap: 1rem;
+              margin-top: 1rem;
+            }
+
+            .site-nav {
+              margin-bottom: 1.5rem;
+            }
+
+            .product-filters {
+              margin-top: 2rem;
+              margin-bottom: 1.5rem;
+            }
+
+            table[aria-label="Product list"] {
+              border-collapse: collapse;
+              margin-top: 1rem;
+            }
+
+            table[aria-label="Cart items"] {
+              border-collapse: collapse;
+              margin: 1rem 0;
+            }
+
+            table[aria-label="Order contents"] {
+              border-collapse: collapse;
+              margin: 1rem 0;
+            }
+
+            .order-action {
+              display: inline;
+              margin: 0 0.5rem;
+            }
+
+            table[aria-label="Cart items"] tfoot a {
+              margin-right: 1rem;
+            }
+
+            .cart-action {
+              display: inline-flex;
+              gap: 0.5rem;
+              align-items: center;
+            }
+
+            .cart-action input[name="quantity"] {
+              width: 4rem;
+            }
+
+            table[aria-label="Product list"] th,
+            table[aria-label="Product list"] td,
+            table[aria-label="Cart items"] th,
+            table[aria-label="Cart items"] td,
+            table[aria-label="Order contents"] th,
+            table[aria-label="Order contents"] td {
+              border: 1px solid #999;
+              padding: 0.5rem 1rem;
+              text-align: left;
+            }
+          </style>
+        </head>
+        <body>
+          <nav class="site-nav"><a href="/">Home</a></nav>
+          <main>
+            <h1>Checkout</h1>
+            <form method="post" action="/checkout">
+              <label>Shipping address
+                <textarea data-testid="shipping-address" name="shipping_address" style=""></textarea>
+              </label>
+              <button data-testid="place-order" type="submit">Place order</button>
+            </form>
+            </main>
+        
+        
+        </body></html>

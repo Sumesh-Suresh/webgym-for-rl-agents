@@ -1,0 +1,17 @@
+[
+  {
+    "coupon_code": null,
+    "created_at": "2024-01-01T12:00:00Z",
+    "id": 1,
+    "items": [
+      {
+        "quantity": 1,
+        "sku": "SKU-E7421",
+        "unit_price_cents": 8999
+      }
+    ],
+    "shipping_address": "789 Pine St, Gotham City, NY 10001",
+    "status": "cancelled",
+    "total_cents": 8999
+  }
+]

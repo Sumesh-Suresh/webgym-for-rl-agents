@@ -1,305 +1,252 @@
-"""Gymnasium-compatible web env for the e-commerce gym.
-
-Each EcomEnv instance owns:
-  * a private SQLite file (in a tempdir),
-  * a private uvicorn process serving the FastAPI app on a free port,
-  * a private Playwright Chromium browser context.
-
-This guarantees parallel safety by isolation — no shared mutable state between
-instances. Reset re-seeds the SQLite file and reloads the start URL; the server
-process stays up across resets (only resetting the DB and reopening the
-browser context) so steady-state reset latency stays well under the 3s budget.
-
-Observation:
-    {
-        "url":        str,
-        "dom":        str   (full HTML),
-        "axtree":     list  (browser accessibility snapshot),
-        "screenshot": bytes (PNG),
-    }
-
-Action (dict):
-    {"type": "click",     "selector": "<css>"}
-    {"type": "type",      "selector": "<css>", "text": "<value>", "clear": true}
-    {"type": "scroll",    "dx": 0, "dy": 500}
-    {"type": "navigate",  "url": "/orders"}            # relative or absolute
-    {"type": "noop"}                                    # do nothing
-"""
-
 from __future__ import annotations
-
-import atexit
-import os
-import shutil
-import signal
 import socket
-import subprocess
-import sys
 import tempfile
+import threading
 import time
-import urllib.request
-from contextlib import closing
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
+from urllib.parse import quote
+
+import gymnasium as gymnasium
+import uvicorn
+from gymnasium import spaces
+from playwright.sync_api import Page, sync_playwright
 
 from app import db
-from gym.tasks import SNAPSHOTS, Task, get_task
+from app.main import create_app
+from gym.actions import Action, Click, Navigate, Scroll, TypeText, coerce_action, make_action_space
+from gym.task import AbstractEcommerceTask
+from gym.ui_actions import UiAction, available_actions
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+class EcommerceEnv(gymnasium.Env):
+    """Gymnasium-style browser environment for the local FastAPI storefront."""
 
-def _free_port() -> int:
-    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def _wait_for_http(url: str, timeout_s: float = 10.0) -> None:
-    deadline = time.monotonic() + timeout_s
-    last_err: Optional[Exception] = None
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=1.0) as resp:
-                if 200 <= resp.status < 500:
-                    return
-        except Exception as e:                                # noqa: BLE001
-            last_err = e
-            time.sleep(0.05)
-    raise RuntimeError(f"server at {url} did not start in {timeout_s}s ({last_err!r})")
-
-
-# ---------------------------------------------------------------------------
-# Env
-# ---------------------------------------------------------------------------
-
-class EcomEnv:
-    """Gymnasium-style environment. Not a subclass of `gymnasium.Env` to avoid a
-    hard dep, but the surface (reset / step / close, returning the standard
-    5-tuple) is compatible."""
-
-    metadata = {"render_modes": ["rgb_array"]}
+    metadata = {"render_modes": ["rgb_array"], "render_fps": 1}
 
     def __init__(
         self,
-        task_id: str,
-        max_steps: int = 50,
+        *,
+        seed: int | None = None,
         headless: bool = True,
-        screenshot: bool = True,
-        keep_workdir: bool = False,
+        timeout_ms: int = 2_000,
+        debug: bool = False,
     ) -> None:
-        self.task: Task = get_task(task_id)
-        self.max_steps = max_steps
+        super().__init__()
+        self.task: AbstractEcommerceTask | None = None
+        self.seed_value = seed
         self.headless = headless
-        self.screenshot_enabled = screenshot
-        self.keep_workdir = keep_workdir
-
-        self._workdir = Path(tempfile.mkdtemp(prefix="ecomgym-"))
-        self._db_path = self._workdir / "store.sqlite"
-        self._port = _free_port()
-        self._base_url = f"http://127.0.0.1:{self._port}"
-        self._server: Optional[subprocess.Popen] = None
-
-        # Playwright handles, lazily created on first reset.
+        self.timeout_ms = timeout_ms
+        self.debug = debug
+        self.action_space = make_action_space()
+        self.observation_space = spaces.Dict(
+            {
+                "url": spaces.Text(max_length=2_048),
+                "dom": spaces.Text(max_length=250_000),
+                "screenshot": spaces.Sequence(spaces.Box(low=0, high=255, shape=(), dtype=int)),
+            }
+        )
+        self._tmpdir: tempfile.TemporaryDirectory[str] | None = None
+        self.db_path: Path | None = None
+        self.base_url: str | None = None
+        self._server: uvicorn.Server | None = None
+        self._server_thread: threading.Thread | None = None
         self._playwright = None
         self._browser = None
         self._context = None
-        self._page = None
+        self.page: Page | None = None
+        self._observation_index = 0
+        self.last_action: Action | None = None
+        self.last_action_error: str = ""
 
-        self._step_count = 0
-        self._snapshot: dict = {}
-        self._terminated = False
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
+        super().reset(seed=seed)
+        self.close()
+        self._observation_index = 0
+        actual_seed = self.seed_value if seed is None else seed
+        self._tmpdir = tempfile.TemporaryDirectory(prefix="webgym-ecommerce-")
+        self.db_path = Path(self._tmpdir.name) / "store.sqlite"
+        db.reset_database(self.db_path, actual_seed)
+        self.task = AbstractEcommerceTask.sample(actual_seed, self.db_path)
+        self._start_server(actual_seed)
+        self._start_browser()
+        assert self.page is not None
+        assert self.task is not None
+        self.page.goto(f"{self.base_url}/", wait_until="networkidle")
+        return self._observation(), {
+            "instruction": self.task.instruction,
+            "task_kind": self.task.kind,
+            "task_name": self.task.name,
+            "db_path": str(self.db_path),
+            "available_actions": available_actions(self.page.url),
+        }
 
-        # Make sure resources are cleaned up if the user forgets to call close().
-        atexit.register(self._safe_close)
+    def step(
+        self, action: Action | UiAction | tuple[int, dict[str, Any]] | dict[str, Any]
+    ) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
+        """Execute action, validate task, return Gymnasium 5-tuple like BrowserGym."""
+        if self.page is None or self.db_path is None or self.task is None:
+            raise RuntimeError("call reset() before step()")
 
-        self._start_server()
-
-    # ----- lifecycle ------------------------------------------------------
-
-    def _start_server(self) -> None:
-        env = os.environ.copy()
-        env["WEBGYM_DB"] = str(self._db_path)
-        env["WEBGYM_SEED"] = "0"
-        # Run as a module so it picks up the project's `app` package on PYTHONPATH.
-        env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent) + os.pathsep + env.get("PYTHONPATH", "")
-        self._server = subprocess.Popen(
-            [
-                sys.executable, "-m", "uvicorn",
-                "app.asgi:app",
-                "--host", "127.0.0.1",
-                "--port", str(self._port),
-                "--log-level", "warning",
-            ],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        _wait_for_http(self._base_url + "/", timeout_s=10.0)
-
-    def _start_playwright(self) -> None:
-        # Import lazily so unit-testing the verifiers doesn't require Playwright.
-        from playwright.sync_api import sync_playwright
-
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=self.headless)
-        self._context = self._browser.new_context()
-        self._page = self._context.new_page()
-
-    # ----- public API -----------------------------------------------------
-
-    def reset(self, seed: int = 0) -> tuple[dict, dict]:
-        # 1. Reset the SQLite DB with the base seed.
-        db.reset_database(self._db_path, seed)
-        # 2. Apply task-specific seeding (e.g., insert a cancelable order).
-        if self.task.seed_extra is not None:
-            self.task.seed_extra(str(self._db_path), seed)
-        # 3. Snapshot DB state for the verifier to diff against later.
-        self._snapshot = SNAPSHOTS[self.task.id](str(self._db_path))
-        self._step_count = 0
-        self._terminated = False
-
-        # 4. (Re-)open a clean browser context so cart/coupon cookies don't leak.
-        if self._page is None:
-            self._start_playwright()
-        else:
-            try:
-                self._context.close()
-            except Exception:
-                pass
-            self._context = self._browser.new_context()
-            self._page = self._context.new_page()
-
-        self._page.goto(self._base_url + "/", wait_until="domcontentloaded")
-        return self._observation(), {"task_id": self.task.id, "instruction": self.task.instruction}
-
-    def step(self, action: dict) -> tuple[dict, float, bool, bool, dict]:
-        if self._terminated:
-            raise RuntimeError("step() called after termination; call reset() first")
-
-        self._step_count += 1
-        truncated = False
-        info: dict[str, Any] = {"action": action}
-
+        parsed_action = coerce_action(action)
+        self.last_action = parsed_action
+        info: dict[str, Any] = {"action_exec_start": time.time()}
         try:
-            self._apply_action(action)
-        except Exception as e:                                # noqa: BLE001
-            info["action_error"] = repr(e)
+            self._execute_action(parsed_action)
+            self.last_action_error = ""
+        except Exception as exc:
+            self.last_action_error = f"{type(exc).__name__}: {exc}"
 
-        success, verify_info = self.task.verify(str(self._db_path), self._snapshot)
-        info["verify"] = verify_info
+        return self.post_step(info)
 
-        terminated = bool(success)
-        reward = 1.0 if success else 0.0
-        if self._step_count >= self.max_steps and not terminated:
-            truncated = True
+    def post_step(
+        self, info: dict[str, Any], validate: bool = True
+    ) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
+        """Post-step hook: validate task, extract observation, return 5-tuple."""
+        assert self.page is not None
+        assert self.db_path is not None
+        assert self.task is not None
 
-        self._terminated = terminated or truncated
-        return self._observation(), reward, terminated, truncated, info
+        info["action_exec_stop"] = time.time()
+        self._wait_dom_loaded()
+        info["validation_start"] = time.time()
+
+        if validate:
+            reward, done, user_message, task_info = self._task_validate()
+            info["task_info"] = task_info
+        else:
+            reward, done, user_message = 0.0, False, ""
+            info["task_info"] = {}
+
+        info["validation_stop"] = time.time()
+        if user_message:
+            info["user_message"] = user_message
+
+        info["get_observation_start"] = time.time()
+        obs = self._observation()
+        info["get_observation_stop"] = time.time()
+        info["available_actions"] = available_actions(self.page.url)
+        info["last_action_error"] = self.last_action_error
+
+        terminated = done
+        truncated = False
+
+        return obs, reward, terminated, truncated, info
+
+    def _execute_action(self, action: Action) -> None:
+        assert self.page is not None
+        assert self.base_url is not None
+
+        if isinstance(action, Click):
+            self.page.click(action.selector, timeout=self.timeout_ms)
+        elif isinstance(action, TypeText):
+            self.page.fill(action.selector, "")
+            self.page.type(action.selector, action.text, timeout=self.timeout_ms)
+        elif isinstance(action, Scroll):
+            self.page.mouse.wheel(0, float(action.delta_y))
+        elif isinstance(action, Navigate):
+            url = action.url
+            if url.startswith("/"):
+                url = f"{self.base_url}{url}"
+            self.page.goto(url, wait_until="networkidle", timeout=self.timeout_ms)
+        else:
+            raise ValueError(f"unsupported action: {action!r}")
+        self.page.wait_for_load_state("networkidle", timeout=self.timeout_ms)
+
+    def _task_validate(self) -> tuple[float, bool, str, dict[str, Any]]:
+        assert self.page is not None
+        assert self.db_path is not None
+        assert self.task is not None
+        return self.task.validate(self.page, self.db_path)
+
+    def _wait_dom_loaded(self) -> None:
+        assert self.page is not None
+        try:
+            self.page.wait_for_load_state("domcontentloaded", timeout=self.timeout_ms)
+        except Exception:
+            pass
+
+    def render(self):
+        if self.page is None:
+            return None
+        return self.page.screenshot(type="png")
 
     def close(self) -> None:
-        self._safe_close()
-
-    # ----- introspection used by oracles ---------------------------------
-
-    @property
-    def page(self):
-        """Direct Playwright page handle. Oracles use this to drive the UI
-        without bouncing through the structured action space."""
-        return self._page
-
-    @property
-    def base_url(self) -> str:
-        return self._base_url
-
-    @property
-    def db_path(self) -> str:
-        return str(self._db_path)
-
-    # ----- internals ------------------------------------------------------
-
-    def _apply_action(self, action: dict) -> None:
-        kind = action.get("type")
-        page = self._page
-        if kind == "noop":
-            return
-        if kind == "click":
-            page.locator(action["selector"]).first.click()
-        elif kind == "type":
-            loc = page.locator(action["selector"]).first
-            if action.get("clear", True):
-                loc.fill(action.get("text", ""))
-            else:
-                loc.type(action.get("text", ""))
-        elif kind == "scroll":
-            dx = int(action.get("dx", 0))
-            dy = int(action.get("dy", 0))
-            page.evaluate(f"window.scrollBy({dx}, {dy})")
-        elif kind == "navigate":
-            target = action["url"]
-            if target.startswith("/"):
-                target = self._base_url + target
-            page.goto(target, wait_until="domcontentloaded")
-        else:
-            raise ValueError(f"unknown action type: {kind!r}")
-
-        # Most actions cause a navigation or form post; wait briefly so the
-        # next observation reflects the post-action page rather than a
-        # mid-flight state.
-        try:
-            page.wait_for_load_state("domcontentloaded", timeout=2000)
-        except Exception:
-            pass
-
-    def _observation(self) -> dict:
-        page = self._page
-        obs: dict[str, Any] = {
-            "url": page.url,
-            "dom": page.content(),
-        }
-        try:
-            obs["axtree"] = page.accessibility.snapshot() or {}
-        except Exception:
-            obs["axtree"] = {}
-        if self.screenshot_enabled:
-            try:
-                obs["screenshot"] = page.screenshot(full_page=False)
-            except Exception:
-                obs["screenshot"] = b""
-        else:
-            obs["screenshot"] = b""
-        return obs
-
-    def _safe_close(self) -> None:
-        # Idempotent. Tear down browser → server → workdir, in that order.
-        try:
-            if self._context is not None:
-                self._context.close()
-        except Exception:
-            pass
-        try:
-            if self._browser is not None:
-                self._browser.close()
-        except Exception:
-            pass
-        try:
-            if self._playwright is not None:
-                self._playwright.stop()
-        except Exception:
-            pass
-        self._context = self._browser = self._playwright = self._page = None
-
-        if self._server is not None and self._server.poll() is None:
-            try:
-                self._server.send_signal(signal.SIGTERM)
-                self._server.wait(timeout=3)
-            except Exception:
-                try:
-                    self._server.kill()
-                except Exception:
-                    pass
+        if self._context is not None:
+            self._context.close()
+            self._context = None
+        if self._browser is not None:
+            self._browser.close()
+            self._browser = None
+        if self._playwright is not None:
+            self._playwright.stop()
+            self._playwright = None
+        if self._server is not None:
+            self._server.should_exit = True
             self._server = None
+        if self._server_thread is not None:
+            self._server_thread.join(timeout=2)
+            self._server_thread = None
+        if self._tmpdir is not None:
+            self._tmpdir.cleanup()
+            self._tmpdir = None
+        self.page = None
+        self.base_url = None
+        self.db_path = None
+        self.task = None
+        self._observation_index = 0
+        self.last_action = None
+        self.last_action_error = ""
 
-        if not self.keep_workdir and self._workdir.exists():
-            shutil.rmtree(self._workdir, ignore_errors=True)
+    def _start_server(self, seed: int | None) -> None:
+        assert self.db_path is not None
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.bind(("127.0.0.1", 0))
+        server_socket.listen(128)
+        port = server_socket.getsockname()[1]
+        self.base_url = f"http://127.0.0.1:{port}"
+
+        config = uvicorn.Config(
+            create_app(self.db_path, seed),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+            lifespan="off",
+        )
+        self._server = uvicorn.Server(config)
+        self._server_thread = threading.Thread(
+            target=self._server.run,
+            kwargs={"sockets": [server_socket]},
+            daemon=True,
+        )
+        self._server_thread.start()
+
+    def _start_browser(self) -> None:
+        self._playwright = sync_playwright().start()
+        self._browser = self._playwright.chromium.launch(headless=self.headless)
+        self._context = self._browser.new_context(viewport={"width": 1280, "height": 900})
+        self.page = self._context.new_page()
+        self.page.set_default_timeout(self.timeout_ms)
+
+    def _observation(self) -> dict[str, Any]:
+        assert self.page is not None
+        assert self.task is not None
+
+        dom = self.page.content()
+        screenshot = self.page.screenshot(type="png")
+
+        observations_dir = Path("observations") / self.task.name
+        observations_dir.mkdir(parents=True, exist_ok=True)
+        self._observation_index += 1
+        url_slug = quote(self.page.url, safe="")
+        filename = f"{self._observation_index:03d}-{url_slug}"
+        dom_path = observations_dir / f"{filename}.html"
+        screenshot_path = observations_dir / f"{filename}.png"
+        dom_path.write_text(dom)
+        screenshot_path.write_bytes(screenshot)
+
+        return {
+            "url": self.page.url,
+            "dom": dom,
+            "screenshot": screenshot,
+        }

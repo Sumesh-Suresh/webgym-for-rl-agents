@@ -1,0 +1,143 @@
+<!DOCTYPE html><html lang="en"><head>
+          <meta charset="utf-8">
+          <title>Orders</title>
+          <style>
+            .home-nav {
+              display: flex;
+              gap: 1rem;
+              margin-top: 1rem;
+            }
+
+            .site-nav {
+              margin-bottom: 1.5rem;
+            }
+
+            .product-filters {
+              margin-top: 2rem;
+              margin-bottom: 1.5rem;
+            }
+
+            table[aria-label="Product list"] {
+              border-collapse: collapse;
+              margin-top: 1rem;
+            }
+
+            table[aria-label="Cart items"] {
+              border-collapse: collapse;
+              margin: 1rem 0;
+            }
+
+            table[aria-label="Order contents"] {
+              border-collapse: collapse;
+              margin: 1rem 0;
+            }
+
+            .order-action {
+              display: inline;
+              margin: 0 0.5rem;
+            }
+
+            table[aria-label="Cart items"] tfoot a {
+              margin-right: 1rem;
+            }
+
+            .cart-action {
+              display: inline-flex;
+              gap: 0.5rem;
+              align-items: center;
+            }
+
+            .cart-action input[name="quantity"] {
+              width: 4rem;
+            }
+
+            table[aria-label="Product list"] th,
+            table[aria-label="Product list"] td,
+            table[aria-label="Cart items"] th,
+            table[aria-label="Cart items"] td,
+            table[aria-label="Order contents"] th,
+            table[aria-label="Order contents"] td {
+              border: 1px solid #999;
+              padding: 0.5rem 1rem;
+              text-align: left;
+            }
+          </style>
+        </head>
+        <body>
+          <nav class="site-nav"><a href="/">Home</a></nav>
+          <main><h1>Orders</h1><ul aria-label="Orders">
+            <li data-testid="order-7">
+              Order 7 placed Placed on 7th January 2024 7:00 AM ET
+              
+    <form class="order-action" method="post" action="/orders/7/cancel">
+      <button data-testid="cancel-order-7" data-oracle-action="cancel-order" type="submit">Cancel order</button>
+    </form>
+    
+              <a data-testid="view-order-7" data-oracle-action="view-order" href="/orders/7">View Order</a>
+            </li>
+            
+
+            <li data-testid="order-6">
+              Order 6 placed Placed on 6th January 2024 7:00 AM ET
+              
+    <form class="order-action" method="post" action="/orders/6/cancel">
+      <button data-testid="cancel-order-6" data-oracle-action="cancel-order" type="submit">Cancel order</button>
+    </form>
+    
+              <a data-testid="view-order-6" data-oracle-action="view-order" href="/orders/6">View Order</a>
+            </li>
+            
+
+            <li data-testid="order-5">
+              Order 5 placed Placed on 5th January 2024 7:00 AM ET
+              
+    <form class="order-action" method="post" action="/orders/5/cancel">
+      <button data-testid="cancel-order-5" data-oracle-action="cancel-order" type="submit">Cancel order</button>
+    </form>
+    
+              <a data-testid="view-order-5" data-oracle-action="view-order" href="/orders/5">View Order</a>
+            </li>
+            
+
+            <li data-testid="order-4">
+              Order 4 placed Placed on 4th January 2024 7:00 AM ET
+              
+    <form class="order-action" method="post" action="/orders/4/cancel">
+      <button data-testid="cancel-order-4" data-oracle-action="cancel-order" type="submit">Cancel order</button>
+    </form>
+    
+              <a data-testid="view-order-4" data-oracle-action="view-order" href="/orders/4">View Order</a>
+            </li>
+            
+
+            <li data-testid="order-3">
+              Order 3 placed Placed on 3rd January 2024 7:00 AM ET
+              
+    <form class="order-action" method="post" action="/orders/3/cancel">
+      <button data-testid="cancel-order-3" data-oracle-action="cancel-order" type="submit">Cancel order</button>
+    </form>
+    
+              <a data-testid="view-order-3" data-oracle-action="view-order" href="/orders/3">View Order</a>
+            </li>
+            
+
+            <li data-testid="order-2">
+              Order 2 placed Placed on 2nd January 2024 7:00 AM ET
+              
+    <form class="order-action" method="post" action="/orders/2/cancel">
+      <button data-testid="cancel-order-2" data-oracle-action="cancel-order" type="submit">Cancel order</button>
+    </form>
+    
+              <a data-testid="view-order-2" data-oracle-action="view-order" href="/orders/2">View Order</a>
+            </li>
+            
+
+            <li data-testid="order-1">
+              Order 1 cancelled Placed on 1st January 2024 7:00 AM ET
+              
+              <a data-testid="view-order-1" data-oracle-action="view-order" href="/orders/1">View Order</a>
+            </li>
+            </ul></main>
+        
+        
+        </body></html>

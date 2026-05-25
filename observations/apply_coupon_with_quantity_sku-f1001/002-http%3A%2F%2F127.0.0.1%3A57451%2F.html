@@ -1,0 +1,177 @@
+<!DOCTYPE html><html lang="en"><head>
+          <meta charset="utf-8">
+          <title>Stationary Shop</title>
+          <style>
+            .home-nav {
+              display: flex;
+              gap: 1rem;
+              margin-top: 1rem;
+            }
+
+            .site-nav {
+              margin-bottom: 1.5rem;
+            }
+
+            .product-filters {
+              margin-top: 2rem;
+              margin-bottom: 1.5rem;
+            }
+
+            table[aria-label="Product list"] {
+              border-collapse: collapse;
+              margin-top: 1rem;
+            }
+
+            table[aria-label="Cart items"] {
+              border-collapse: collapse;
+              margin: 1rem 0;
+            }
+
+            table[aria-label="Order contents"] {
+              border-collapse: collapse;
+              margin: 1rem 0;
+            }
+
+            .order-action {
+              display: inline;
+              margin: 0 0.5rem;
+            }
+
+            table[aria-label="Cart items"] tfoot a {
+              margin-right: 1rem;
+            }
+
+            .cart-action {
+              display: inline-flex;
+              gap: 0.5rem;
+              align-items: center;
+            }
+
+            .cart-action input[name="quantity"] {
+              width: 4rem;
+            }
+
+            table[aria-label="Product list"] th,
+            table[aria-label="Product list"] td,
+            table[aria-label="Cart items"] th,
+            table[aria-label="Cart items"] td,
+            table[aria-label="Order contents"] th,
+            table[aria-label="Order contents"] td {
+              border: 1px solid #999;
+              padding: 0.5rem 1rem;
+              text-align: left;
+            }
+          </style>
+        </head>
+        <body>
+          
+          <main>
+            <h1>Stationary Shop</h1>
+            <nav class="home-nav" aria-label="Store pages">
+              <a href="/">Products</a>
+              <a href="/cart">Cart</a>
+              <a href="/checkout">Checkout</a>
+              <a href="/orders">Order History</a>
+            </nav>
+            <form class="product-filters" method="get" action="/" aria-label="Product filters">
+              <label>Category
+                <select data-testid="category-filter" name="category">
+                  <option value="">All</option>
+                  <option value="Electronics">Electronics</option>
+<option value="Fitness">Fitness</option>
+<option value="Home">Home</option>
+<option value="Office">Office</option>
+                </select>
+              </label>
+              <label>Sort by
+                <select data-testid="sort-filter" name="sort">
+                  <option value="alpha" selected="">Alphabetical</option>
+<option value="price_asc">Price: low to high</option>
+<option value="price_desc">Price: high to low</option>
+                </select>
+              </label>
+              <button data-testid="apply-filters" type="submit">Apply filters</button>
+            </form>
+            <table aria-label="Product list">
+              <thead>
+                <tr>
+                  <th scope="col">Product</th>
+                  <th scope="col">Product ID</th>
+                  <th scope="col">Price</th>
+                </tr>
+              </thead>
+              <tbody>
+            <tr data-testid="product-SKU-E2042">
+              <td><a data-oracle-action="product-link" href="/product/SKU-E2042">Bluetooth Speaker</a></td>
+              <td>SKU-E2042</td>
+              <td>$34.99</td>
+            </tr>
+            
+
+            <tr data-testid="product-SKU-H2002">
+              <td><a data-oracle-action="product-link" href="/product/SKU-H2002">Desk Lamp</a></td>
+              <td>SKU-H2002</td>
+              <td>$29.99</td>
+            </tr>
+            
+
+            <tr data-testid="product-SKU-O3003">
+              <td><a data-oracle-action="product-link" href="/product/SKU-O3003">Desk Organizer</a></td>
+              <td>SKU-O3003</td>
+              <td>$17.99</td>
+            </tr>
+            
+
+            <tr data-testid="product-SKU-F4004">
+              <td><a data-oracle-action="product-link" href="/product/SKU-F4004">Foam Roller</a></td>
+              <td>SKU-F4004</td>
+              <td>$24.99</td>
+            </tr>
+            
+
+            <tr data-testid="product-SKU-O1001">
+              <td><a data-oracle-action="product-link" href="/product/SKU-O1001">Notebook</a></td>
+              <td>SKU-O1001</td>
+              <td>$6.99</td>
+            </tr>
+            
+
+            <tr data-testid="product-SKU-F1001">
+              <td><a data-oracle-action="product-link" href="/product/SKU-F1001">Running Socks</a></td>
+              <td>SKU-F1001</td>
+              <td>$9.99</td>
+            </tr>
+            
+
+            <tr data-testid="product-SKU-E1001">
+              <td><a data-oracle-action="product-link" href="/product/SKU-E1001">USB-C Charging Cable</a></td>
+              <td>SKU-E1001</td>
+              <td>$12.99</td>
+            </tr>
+            
+
+            <tr data-testid="product-SKU-H5005">
+              <td><a data-oracle-action="product-link" href="/product/SKU-H5005">Wall Clock</a></td>
+              <td>SKU-H5005</td>
+              <td>$18.99</td>
+            </tr>
+            
+
+            <tr data-testid="product-SKU-E3333">
+              <td><a data-oracle-action="product-link" href="/product/SKU-E3333">Wireless Mouse</a></td>
+              <td>SKU-E3333</td>
+              <td>$24.99</td>
+            </tr>
+            
+
+            <tr data-testid="product-SKU-F2002">
+              <td><a data-oracle-action="product-link" href="/product/SKU-F2002">Yoga Mat</a></td>
+              <td>SKU-F2002</td>
+              <td>$27.99</td>
+            </tr>
+            </tbody>
+            </table>
+            </main>
+        
+        
+        </body></html>

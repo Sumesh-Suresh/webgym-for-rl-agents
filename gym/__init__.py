@@ -1,6 +1,2 @@
-"""Minimal e-commerce web gym."""
+"""Gym client package for the e-commerce environment."""
 
-from gym.env import EcomEnv
-from gym.tasks import TASKS, Task, get_task
-
-__all__ = ["EcomEnv", "TASKS", "Task", "get_task"]

@@ -153,30 +153,6 @@ def get_product(db_path: str | Path, sku: str) -> sqlite3.Row | None:
         return conn.execute("SELECT * FROM products WHERE sku = ?", (sku,)).fetchone()
 
 
-def ensure_products(db_path: str | Path, skus: Iterable[str]) -> None:
-    """Insert catalog products that are missing from a seeded database.
-
-    The storefront reset samples a subset of BASE_PRODUCTS; gym tasks that
-    reference specific SKUs call this before creating orders."""
-    catalog = {product[0]: product for product in BASE_PRODUCTS}
-    with connect(db_path) as conn:
-        for sku in skus:
-            if conn.execute("SELECT 1 FROM products WHERE sku = ?", (sku,)).fetchone():
-                continue
-            product = catalog.get(sku)
-            if product is None:
-                raise ValueError(f"unknown sku: {sku}")
-            _, name, category, price_cents, description = product
-            next_id = conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM products").fetchone()[0]
-            conn.execute(
-                """
-                INSERT INTO products (id, sku, name, category, price_cents, description)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (next_id, sku, name, category, price_cents, description),
-            )
-
-
 def get_coupon(db_path: str | Path, code: str | None) -> sqlite3.Row | None:
     if not code:
         return None

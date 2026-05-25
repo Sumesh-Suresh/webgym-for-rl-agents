@@ -25,21 +25,11 @@ SORT_OPTIONS = {
 
 def create_app(db_path: str | Path | None = None, seed: int | None = None) -> FastAPI:
     database = Path(db_path or os.environ.get("WEBGYM_DB", "data/store.sqlite"))
-    resolved_seed = seed if seed is not None else int(os.environ.get("WEBGYM_SEED", "0"))
     if not database.exists():
-        db.reset_database(database, resolved_seed)
+        db.reset_database(database, seed)
 
-    app = FastAPI(title="E-Commerce Gym Storefront")
+    app = FastAPI(title="Minimal E-commerce Gym Storefront")
     app.state.db_path = str(database)
-    app.state.seed = resolved_seed
-
-    @app.post("/reset")
-    async def reset_gym():
-        db.reset_database(app.state.db_path, app.state.seed)
-        response = redirect("/")
-        response.delete_cookie("cart")
-        response.delete_cookie("coupon")
-        return response
 
     @app.get("/", response_class=HTMLResponse)
     async def index(category: Optional[str] = None, sort: str = "alpha"):
@@ -65,9 +55,9 @@ def create_app(db_path: str | Path | None = None, seed: int | None = None) -> Fa
             for product in products
         )
         return page(
-            "Store",
+            "Stationary Shop",
             f"""
-            <h1>Store</h1>
+            <h1>Stationary Shop</h1>
             <nav class="home-nav" aria-label="Store pages">
               <a href="/">Products</a>
               <a href="/cart">Cart</a>
@@ -294,7 +284,7 @@ def create_app(db_path: str | Path | None = None, seed: int | None = None) -> Fa
             """
             for order in db.list_orders(app.state.db_path)
         )
-        return page("Orders", f'<h1>Orders</h1><ul aria-label="Orders">{order_items}</ul>')
+        return page("Orders", f"<h1>Orders</h1><ul aria-label=\"Orders\">{order_items}</ul>")
 
     @app.get("/orders/{order_id}", response_class=HTMLResponse)
     async def order_detail(order_id: int):
