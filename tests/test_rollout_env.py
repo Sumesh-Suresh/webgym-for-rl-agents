@@ -20,7 +20,7 @@ Adversarial cases probe every axis the verifiers check:
   • env:    step budget too small, cart state leak across resets
 
 Run with:
-    .venv/bin/pytest tests/rollout_test_e2e.py -v -s
+    .venv/bin/pytest tests/test_rollout_env.py -v -s
 """
 from __future__ import annotations
 
