@@ -157,25 +157,21 @@ Important precursors:
 
 ## Example Scripts
 
-The `example/` folder contains three standalone scripts that show the main ways
+The `example/` folder contains two standalone scripts that show the main ways
 to customize an episode. Each script accepts `--seed`; omitting it uses the
 script's default seed.
 
 - `example/example_oracle.py` runs `gym.runner.run_episode()` with the built-in
   oracle policy and the task sampled by the environment. Use this when you want
   the simplest end-to-end rollout with no customization.
-- `example/example_custom_task.py` calls `env.reset()` to initialize the browser
-  and database, defines and injects `BuyMostExpensiveInCategoryTask`, and lets
-  the built-in oracle complete that custom task.
-- `example/example_custom_task_and_policy.py` defines and injects
-  `BuyMostExpensiveInCategoryTask`, then drives it with a custom policy that
-  returns a task-compatible list of actions.
+- `example/example_custom_task_and_policy.py` shows how to define and inject
+  `BuyMostExpensiveInCategoryTask`, then drive it with a custom policy that
+  returns task-specific actions for the environment to execute and validate.
 
 Run them from the repository root:
 
 ```bash
 python example/example_oracle.py
-python example/example_custom_task.py
 python example/example_custom_task_and_policy.py --seed 7
 ```
 
