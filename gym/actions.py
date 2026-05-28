@@ -156,7 +156,7 @@ def coerce_action(action: Action | tuple[int, dict[str, Any]] | dict[str, Any]) 
     if isinstance(action, (GoTo, FilterProducts, OpenProduct, UiClick, UiFill, ViewOrder, CancelOrder)):
         return coerce_action(resolve_ui_action(action))
     if isinstance(action, tuple):
-        return action_from_oneof(action)
+        return action_from_oneof(action)        # done with the current action_space
     if isinstance(action, dict):
         action_type = action.get("type")
         if action_type in {

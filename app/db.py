@@ -12,6 +12,7 @@ MIN_PER_CATEGORY = 2
 MIN_ORDERS_PER_RESET = 0
 MAX_ORDERS_PER_RESET = 8
 MAX_ITEMS_PER_ORDER = 4
+MAX_QUANTITY_PER_ITEM = 10
 CANCEL_RATE = 0.3
 
 BASE_PRODUCTS = [
@@ -293,8 +294,12 @@ def seeded_products(rng: random.Random) -> Iterable[tuple[int, str, str, str, in
 
     rng.shuffle(leftovers)
 
-    deficit = max(0, MIN_PRODUCTS_PER_RESET - len(selected))
-    selected.extend(leftovers[:deficit])
+    # deficit = max(0, MIN_PRODUCTS_PER_RESET - len(selected))
+    # selected.extend(leftovers[:deficit])
+
+    # ATLEAST MIN_PRODUCTS_PER_RESET products
+    target_count = rng.randint(max(MIN_PRODUCTS_PER_RESET, len(selected)), len(BASE_PRODUCTS))
+    selected.extend(leftovers[: target_count - len(selected)])
 
     selected.sort(key=lambda product: product[0])  # stable SKU order
 
@@ -315,7 +320,8 @@ def seeded_orders(
     base_date = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc) # for deterministic timestamps
 
     for order_id in range(1, n_orders + 1):
-        item_count = rng.randint(1, min(2, len(products)))
+        # item_count = rng.randint(1, min(2, len(products))) # at least 1 item and at most 2 items (hardcoded)
+        item_count = (rng.randint(1, MAX_ITEMS_PER_ORDER)) 
         order_products = rng.sample(products, item_count)
         coupon_code = rng.choice([None] + sorted(COUPON_CODE_MAP.keys()))
         status = "cancelled" if rng.random() < CANCEL_RATE else "placed"
@@ -324,7 +330,7 @@ def seeded_orders(
 
         subtotal = 0
         for _, sku, _, _, price_cents, _ in order_products:
-            quantity = rng.randint(1, MAX_ITEMS_PER_ORDER)
+            quantity = rng.randint(1, MAX_QUANTITY_PER_ITEM)
             order_item_rows.append((order_id, sku, quantity, price_cents))
             subtotal += price_cents * quantity
 

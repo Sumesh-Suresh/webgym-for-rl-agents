@@ -6,7 +6,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from gym.debug_report import EpisodeDebugReport, render_episode_report, render_rollout_summary
 from gym.env import EcommerceEnv
-from gym.policies import random_action, scripted_oracle_actions
+from gym.curr_policies import random_action, scripted_oracle_actions
 
 
 def run_episode(
